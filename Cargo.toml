@@ -1,0 +1,25 @@
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[package]
+name = "tc_tea"
+version = "0.1.0"
+authors = ["Jixun Wu <jixun.moe@gmail.com>"]
+edition = "2021"
+
+license = "MIT OR Apache-2.0"
+keywords = ["tea", "tencent"]
+readme = "README.md"
+description = "Rusty implementation of Tencent's varient of TEA (tc_tea)."
+repository = "https://github.com/jixunmoe/tc_tea_rust/"
+categories = ["cryptography"]
+
+[badges]
+maintenance = { status = "as-is" }
+
+[dependencies]
+rand = { version = "0.8.0", features = ["rand_chacha"] }
+rand_chacha = "0.3.1"
+
+[features]
+default = ["secure_random"]
+secure_random = ["rand/getrandom"]

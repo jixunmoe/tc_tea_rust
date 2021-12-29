@@ -60,7 +60,7 @@ pub fn encrypt<T: AsRef<[u8]>, K: AsRef<[u8]>>(plaintext: T, key: K) -> Option<B
         .unwrap()
         .fill_bytes(&mut encrypted[0..header_len]);
 
-    encrypted[0] = (encrypted[0] & 0b1111_1100) | ((pad_len as u8) & 0b0000_0111);
+    encrypted[0] = (encrypted[0] & 0b1111_1000) | ((pad_len as u8) & 0b0000_0111);
 
     // Copy input to destination buffer.
     encrypted[header_len..header_len + plaintext.len()]
@@ -167,6 +167,22 @@ mod tests {
         // Since encryption utilises random numbers, we are just going to
         let decrypted = decrypt(encrypted, ENCRYPTION_KEY).unwrap();
         assert_eq!(decrypted, GOOD_DECRYPTED_DATA.into());
+    }
+
+    #[test]
+    fn tc_tea_test_long_encryption() {
+        let input = b"...test data by Jixun";
+        for i in 0..255 {
+            let encrypted = encrypt(input, ENCRYPTION_KEY).unwrap();
+            assert_eq!(encrypted.len() % 8, 0);
+            assert!(encrypted.len() > input.len());
+            eprintln!(":2 encrypted.len(): {}", encrypted.len());
+
+            // Since encryption utilises random numbers, we are just going to
+            let decrypted = decrypt(encrypted, ENCRYPTION_KEY).unwrap();
+            assert_eq!(&*decrypted, input);
+            eprintln!("run {} ok", i)
+        }
     }
 
     #[test]

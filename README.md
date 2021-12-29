@@ -16,7 +16,7 @@ Code implemented according to the spec described in
 Add the following to `[dependencies]` section in your `Cargo.toml` file:
 
 ```toml
-tc_tea = "0.1.1"
+tc_tea = "0.1.2"
 ```
 
 ## Troubleshooting

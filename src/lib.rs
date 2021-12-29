@@ -5,5 +5,6 @@
 mod stream_ext;
 mod tc_tea_public;
 mod tc_tea_internal;
+mod tc_tea_cbc;
 
 pub use tc_tea_public::*;

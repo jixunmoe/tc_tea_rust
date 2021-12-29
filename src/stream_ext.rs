@@ -1,3 +1,5 @@
+use std::ops::BitOr;
+
 pub trait StreamExt {
     fn read_u32_be(&self, offset: usize) -> u32;
     fn write_u32_be(&mut self, offset: usize, value: u32);
@@ -34,13 +36,7 @@ impl StreamExt for [u8] {
     /// Attempts to do constant time comparison,
     ///   but probably gets optimised away by llvm... lol
     fn is_all_zeros(&self) -> bool {
-        let mut sum = 0;
-
-        for b in self {
-            sum |= b;
-        }
-
-        return sum == 0;
+        self.iter().fold(0u8, |acc, b| acc.bitor(b)) == 0
     }
 
     #[inline]

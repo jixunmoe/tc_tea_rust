@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn tc_tea_decryption_reject_non_zero_byte() {
-        let mut bad_data = GOOD_ENCRYPTED_DATA.clone();
+        let mut bad_data = GOOD_ENCRYPTED_DATA;
         bad_data[23] ^= 0xff; // last byte
         assert!(decrypt(&bad_data, ENCRYPTION_KEY).is_none());
     }

@@ -13,7 +13,7 @@ pub fn parse_key(key: &[u8]) -> Option<[u32; 4]> {
     for (i, k) in k.iter_mut().enumerate() {
         *k = key.read_u32_be(i * 4);
     }
-    return Some(k);
+    Some(k)
 }
 
 #[inline]

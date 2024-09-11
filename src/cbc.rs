@@ -1,20 +1,10 @@
+use super::{ecb, TcTeaError};
 use rand::prelude::*;
 use std::cmp::min;
 
-use super::{ecb, TcTeaError};
-
-const SALT_LEN: usize = 2;
-const ZERO_LEN: usize = 7;
-const FIXED_PADDING_LEN: usize = 1 + SALT_LEN + ZERO_LEN;
-
-/// Calculate expected size of encrypted data.
-///
-/// `body_size` is the size of data you'd like to encrypt.
-pub fn get_encrypted_size(body_size: usize) -> usize {
-    let len = FIXED_PADDING_LEN + body_size;
-    let pad_len = (8 - (len & 0b0111)) & 0b0111;
-    len + pad_len
-}
+pub(crate) const SALT_LEN: usize = 2;
+pub(crate) const ZERO_LEN: usize = 7;
+pub(crate) const FIXED_PADDING_LEN: usize = 1 + SALT_LEN + ZERO_LEN;
 
 fn xor_tea_block(a: &[u8; 8], b: &[u8; 8]) -> [u8; 8] {
     let mut dest = *a;
@@ -67,7 +57,7 @@ pub fn encrypt<'a>(
 
     // Set up a header with random padding/salt
     #[cfg(feature = "secure_random")]
-    ChaCha20Rng::from_entropy().fill_bytes(&mut header[0..header_len]);
+    rand_chacha::ChaCha20Rng::from_entropy().fill_bytes(&mut header[0..header_len]);
     #[cfg(not(feature = "secure_random"))]
     rand_pcg::Pcg32::from_entropy().fill_bytes(&mut header[0..header_len]);
 
@@ -78,10 +68,12 @@ pub fn encrypt<'a>(
     header[0] = (header[0] & 0b1111_1000) | ((pad_len as u8) & 0b0000_0111);
     header[header_len..header_len + copy_to_header_len].copy_from_slice(plain_header);
 
+    // Access to slice of "cipher" from inner scope
     {
         let mut iv1 = [0u8; 8];
         let mut iv2 = [0u8; 8];
 
+        // Process whole blocks
         let plain_last_block_len = plain.len() % 8;
         let (plain, plain_last_block) = plain.split_at(plain.len() - plain_last_block_len);
 
@@ -93,13 +85,13 @@ pub fn encrypt<'a>(
         encrypt_round(cipher, &header[8..], key, &mut iv1, &mut iv2);
         let mut cipher = &mut cipher[8..];
 
-        if !plain.is_empty() {
-            for (plain, cipher) in plain.chunks_exact(8).zip(cipher.chunks_exact_mut(8)) {
-                encrypt_round(cipher, plain, key, &mut iv1, &mut iv2);
-            }
-            cipher = &mut cipher[plain.len()..];
+        // Handle whole blocks
+        for (plain, cipher) in plain.chunks_exact(8).zip(cipher.chunks_exact_mut(8)) {
+            encrypt_round(cipher, plain, key, &mut iv1, &mut iv2);
         }
+        cipher = &mut cipher[plain.len()..];
 
+        // Handle last block, if there's any
         if plain_last_block_len != 0 {
             let mut last_block = [0u8; 8];
             last_block[..plain_last_block_len].copy_from_slice(plain_last_block);
@@ -261,16 +253,5 @@ mod tests {
         }
 
         Ok(())
-    }
-
-    #[test]
-    fn test_calc_encrypted_size() {
-        assert_eq!(get_encrypted_size(0), 16);
-        assert_eq!(get_encrypted_size(1), 16);
-        assert_eq!(get_encrypted_size(6), 16);
-
-        assert_eq!(get_encrypted_size(7), 24);
-        assert_eq!(get_encrypted_size(14), 24);
-        assert_eq!(get_encrypted_size(15), 32);
     }
 }

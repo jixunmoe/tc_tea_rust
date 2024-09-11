@@ -2,7 +2,6 @@
 //!
 //! Notably, it uses a different round number and uses a "tweaked" CBC mode.
 
-use crate::cbc::get_encrypted_size;
 use byteorder::{ByteOrder, BE};
 use thiserror::Error;
 
@@ -23,6 +22,15 @@ pub enum TcTeaError {
     InvalidPadding,
     #[error("Slice error.")]
     SliceError,
+}
+
+/// Calculate expected size of encrypted data.
+///
+/// `body_size` is the size of data you'd like to encrypt.
+pub fn get_encrypted_size(body_size: usize) -> usize {
+    let len = cbc::FIXED_PADDING_LEN + body_size;
+    let pad_len = (8 - (len & 0b0111)) & 0b0111;
+    len + pad_len
 }
 
 /// Parse key to u32 array
@@ -80,13 +88,29 @@ pub fn decrypt<T: AsRef<[u8]>>(encrypted: T, key: &[u8]) -> Result<Vec<u8>, TcTe
     Ok(Vec::from(result))
 }
 
-#[test]
-fn test_sanity_test() -> Result<(), TcTeaError> {
-    let key = b"43218765dcbahgfe";
-    let message = b"this is a test message.";
-    let cipher = encrypt(message, key)?;
-    let plain = decrypt(cipher, key)?;
-    assert_eq!(message, plain.as_slice());
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    Ok(())
+    #[test]
+    fn test_calc_encrypted_size() {
+        assert_eq!(get_encrypted_size(0), 16);
+        assert_eq!(get_encrypted_size(1), 16);
+        assert_eq!(get_encrypted_size(6), 16);
+
+        assert_eq!(get_encrypted_size(7), 24);
+        assert_eq!(get_encrypted_size(14), 24);
+        assert_eq!(get_encrypted_size(15), 32);
+    }
+
+    #[test]
+    fn test_sanity_test() -> Result<(), TcTeaError> {
+        let key = b"43218765dcbahgfe";
+        let message = b"this is a test message.";
+        let cipher = encrypt(message, key)?;
+        let plain = decrypt(cipher, key)?;
+        assert_eq!(message, plain.as_slice());
+
+        Ok(())
+    }
 }

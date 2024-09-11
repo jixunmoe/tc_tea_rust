@@ -7,6 +7,7 @@ use thiserror::Error;
 
 pub mod cbc;
 pub mod ecb;
+mod ecb_impl;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum TcTeaError {

@@ -2,7 +2,7 @@
 
 [package]
 name = "tc_tea"
-version = "0.1.7"
+version = "0.2.0"
 authors = ["Jixun Wu <jixun.moe@gmail.com>"]
 edition = "2021"
 

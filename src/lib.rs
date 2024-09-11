@@ -2,6 +2,7 @@
 //!
 //! Notably, it uses a different round number and uses a "tweaked" CBC mode.
 
+use crate::cbc::get_encrypted_size;
 use byteorder::{ByteOrder, BE};
 use thiserror::Error;
 
@@ -56,9 +57,10 @@ pub fn parse_key(key: &[u8]) -> Result<[u32; 4], TcTeaError> {
 pub fn encrypt<T: AsRef<[u8]>>(plaintext: T, key: &[u8]) -> Result<Vec<u8>, TcTeaError> {
     let key = parse_key(key)?;
     let plaintext = plaintext.as_ref();
-    let mut cipher = vec![0u8; plaintext.len()];
-    let result = cbc::decrypt(&mut cipher, plaintext, &key)?;
-    Ok(Vec::from(result))
+    let cipher_len = get_encrypted_size(plaintext.len());
+    let mut cipher = vec![0u8; cipher_len];
+    cbc::encrypt(&mut cipher, plaintext, &key)?;
+    Ok(cipher)
 }
 
 /// Decrypts a byte array containing the following:
@@ -76,4 +78,15 @@ pub fn decrypt<T: AsRef<[u8]>>(encrypted: T, key: &[u8]) -> Result<Vec<u8>, TcTe
     let mut plain = vec![0u8; encrypted.len()];
     let result = cbc::decrypt(&mut plain, encrypted, &key)?;
     Ok(Vec::from(result))
+}
+
+#[test]
+fn test_sanity_test() -> Result<(), TcTeaError> {
+    let key = b"43218765dcbahgfe";
+    let message = b"this is a test message.";
+    let cipher = encrypt(message, key)?;
+    let plain = decrypt(cipher, key)?;
+    assert_eq!(message, plain.as_slice());
+
+    Ok(())
 }

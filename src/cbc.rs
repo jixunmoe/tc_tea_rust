@@ -1,42 +1,33 @@
-use super::{ecb, TcTeaError};
-use rand::prelude::*;
+use super::{ecb_impl, TcTeaError};
+use byteorder::{ByteOrder, BE};
 use std::cmp::min;
 
 pub(crate) const SALT_LEN: usize = 2;
 pub(crate) const ZERO_LEN: usize = 7;
 pub(crate) const FIXED_PADDING_LEN: usize = 1 + SALT_LEN + ZERO_LEN;
 
-fn xor_tea_block(a: &[u8; 8], b: &[u8; 8]) -> [u8; 8] {
-    let mut dest = *a;
-    dest.iter_mut().zip(b).for_each(|(a, b)| *a ^= *b);
-    dest
-}
-
-#[inline(always)]
 fn encrypt_round(
     cipher: &mut [u8],
     plain: &[u8],
     key: &[u32; 4],
-    iv1: &mut [u8; 8],
-    iv2: &mut [u8; 8],
-) {
-    let mut plain_block = [0u8; 8];
-    plain_block.copy_from_slice(plain);
+    iv1: u64,
+    iv2: u64,
+) -> (u64, u64) {
+    let plain_block = BE::read_u64(plain);
 
-    let iv2_next = xor_tea_block(&plain_block, iv1);
-    let mut result = iv2_next;
-    ecb::encrypt(&mut result, key);
+    let iv2_next = plain_block ^ iv1;
+    let result = ecb_impl::encrypt(iv2_next, key);
+    let cipher_block = result ^ iv2;
+    BE::write_u64(cipher, cipher_block);
 
-    let cipher_block = xor_tea_block(&result, iv2);
-    *iv1 = cipher_block;
-    *iv2 = iv2_next;
-    cipher[..8].copy_from_slice(&cipher_block);
+    (cipher_block, iv2_next)
 }
 
 pub fn encrypt<'a>(
     cipher: &'a mut [u8],
     plain: &[u8],
     key: &[u32; 4],
+    salt: &[u8; 10],
 ) -> Result<&'a [u8], TcTeaError> {
     // buffer size calculation
     let len = FIXED_PADDING_LEN + plain.len();
@@ -56,10 +47,7 @@ pub fn encrypt<'a>(
     let mut header = [0u8; 16];
 
     // Set up a header with random padding/salt
-    #[cfg(feature = "secure_random")]
-    rand_chacha::ChaCha20Rng::from_entropy().fill_bytes(&mut header[0..header_len]);
-    #[cfg(not(feature = "secure_random"))]
-    rand_pcg::Pcg32::from_entropy().fill_bytes(&mut header[0..header_len]);
+    header[..header_len].copy_from_slice(&salt[..header_len]);
 
     // Build header
     let copy_to_header_len = min(16 - header_len, plain.len());
@@ -70,8 +58,8 @@ pub fn encrypt<'a>(
 
     // Access to slice of "cipher" from inner scope
     {
-        let mut iv1 = [0u8; 8];
-        let mut iv2 = [0u8; 8];
+        let mut iv1 = 0u64;
+        let mut iv2 = 0u64;
 
         // Process whole blocks
         let plain_last_block_len = plain.len() % 8;
@@ -79,15 +67,15 @@ pub fn encrypt<'a>(
 
         // Encrypt first 2 blocks from the header, then whole blocks
         // cbc_encrypt_round(cipher, &header, key, &mut iv1, &mut iv2);
-        encrypt_round(cipher, &header[..8], key, &mut iv1, &mut iv2);
+        (iv1, iv2) = encrypt_round(cipher, &header[..8], key, iv1, iv2);
         let cipher = &mut cipher[8..];
 
-        encrypt_round(cipher, &header[8..], key, &mut iv1, &mut iv2);
+        (iv1, iv2) = encrypt_round(cipher, &header[8..], key, iv1, iv2);
         let mut cipher = &mut cipher[8..];
 
         // Handle whole blocks
         for (plain, cipher) in plain.chunks_exact(8).zip(cipher.chunks_exact_mut(8)) {
-            encrypt_round(cipher, plain, key, &mut iv1, &mut iv2);
+            (iv1, iv2) = encrypt_round(cipher, plain, key, iv1, iv2);
         }
         cipher = &mut cipher[plain.len()..];
 
@@ -95,7 +83,7 @@ pub fn encrypt<'a>(
         if plain_last_block_len != 0 {
             let mut last_block = [0u8; 8];
             last_block[..plain_last_block_len].copy_from_slice(plain_last_block);
-            encrypt_round(cipher, &last_block, key, &mut iv1, &mut iv2);
+            encrypt_round(cipher, &last_block, key, iv1, iv2);
         }
     }
 
@@ -103,25 +91,20 @@ pub fn encrypt<'a>(
     Ok(cipher)
 }
 
-#[inline(always)]
 fn decrypt_round(
     plain: &mut [u8],
     cipher: &[u8],
     key: &[u32; 4],
-    iv1: &mut [u8; 8],
-    iv2: &mut [u8; 8],
-) {
-    let mut cipher_block = [0u8; 8];
-    cipher_block.copy_from_slice(cipher);
+    iv1: u64,
+    iv2: u64,
+) -> (u64, u64) {
+    let cipher_block = BE::read_u64(cipher);
+    let result = cipher_block ^ iv2;
+    let next_iv2 = ecb_impl::decrypt(result, key);
+    let plain_block = next_iv2 ^ iv1;
 
-    let mut result = xor_tea_block(&cipher_block, iv2);
-    ecb::decrypt(&mut result, key);
-    let plain_block = xor_tea_block(&result, iv1);
-
-    *iv1 = cipher_block;
-    *iv2 = result;
-
-    plain[..8].copy_from_slice(&plain_block);
+    BE::write_u64(plain, plain_block);
+    (cipher_block, next_iv2)
 }
 
 pub fn decrypt<'a>(
@@ -139,10 +122,11 @@ pub fn decrypt<'a>(
     }
 
     let plain = &mut plain[..input_len];
-    let mut iv1 = [0u8; 8];
-    let mut iv2 = [0u8; 8];
+
+    let mut iv1 = 0u64;
+    let mut iv2 = 0u64;
     for (cipher, plain) in cipher.chunks_exact(8).zip(plain.chunks_exact_mut(8)) {
-        decrypt_round(plain, cipher, key, &mut iv1, &mut iv2);
+        (iv1, iv2) = decrypt_round(plain, cipher, key, iv1, iv2);
     }
 
     let pad_size = usize::from(plain[0] & 0b111);
@@ -162,6 +146,8 @@ pub fn decrypt<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const TEST_SALT: [u8; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
     // Known good data, generated from its C++ implementation
     const GOOD_ENCRYPTED_DATA: [u8; 24] = [
@@ -196,7 +182,7 @@ mod tests {
     #[test]
     fn tc_tea_encrypt_empty() -> Result<(), TcTeaError> {
         let mut cipher_buffer = [0xffu8; 100];
-        let cipher = encrypt(&mut cipher_buffer, b"", &ENCRYPTION_KEY)?;
+        let cipher = encrypt(&mut cipher_buffer, b"", &ENCRYPTION_KEY, &TEST_SALT)?;
         assert_eq!(cipher.len(), 16);
 
         let mut plain = vec![0xffu8; 24];
@@ -210,7 +196,7 @@ mod tests {
     #[test]
     fn tc_tea_basic_encryption() -> Result<(), TcTeaError> {
         let mut cipher_buffer = [0xffu8; 100];
-        let cipher = encrypt(&mut cipher_buffer, &EXPECTED_PLAIN_TEXT, &ENCRYPTION_KEY)?;
+        let cipher = encrypt(&mut cipher_buffer, &EXPECTED_PLAIN_TEXT, &ENCRYPTION_KEY, &TEST_SALT)?;
         assert_eq!(cipher.len(), 24);
 
         let mut plain = vec![0xffu8; 24];
@@ -226,7 +212,7 @@ mod tests {
         let mut cipher_buffer = [0xffu8; 100];
         let input = b"...test data by Jixun ... ... test hello aaa";
         for _ in 0..16 {
-            let cipher = encrypt(&mut cipher_buffer, input, &ENCRYPTION_KEY)?;
+            let cipher = encrypt(&mut cipher_buffer, input, &ENCRYPTION_KEY, &TEST_SALT)?;
             assert_eq!(cipher.len() % 8, 0);
             assert!(cipher.len() > input.len());
 
@@ -247,7 +233,7 @@ mod tests {
         let input = b"...test data by Jixun ... ... test hello aaa";
         for test_len in 0usize..input.len() {
             let input = &input[..test_len];
-            let cipher = encrypt(&mut cipher_buffer, input, &ENCRYPTION_KEY)?;
+            let cipher = encrypt(&mut cipher_buffer, input, &ENCRYPTION_KEY, &TEST_SALT)?;
             let decrypted = decrypt(&mut plain_buffer, cipher, &ENCRYPTION_KEY)?;
             assert_eq!(decrypted, input);
         }

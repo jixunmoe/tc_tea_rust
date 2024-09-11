@@ -3,11 +3,13 @@
 //! Notably, it uses a different round number and uses a "tweaked" CBC mode.
 
 use byteorder::{ByteOrder, BE};
+use rand::RngCore;
 use thiserror::Error;
 
 pub mod cbc;
 pub mod ecb;
 mod ecb_impl;
+use rand::prelude::*;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum TcTeaError {
@@ -68,7 +70,14 @@ pub fn encrypt<T: AsRef<[u8]>>(plaintext: T, key: &[u8]) -> Result<Vec<u8>, TcTe
     let plaintext = plaintext.as_ref();
     let cipher_len = get_encrypted_size(plaintext.len());
     let mut cipher = vec![0u8; cipher_len];
-    cbc::encrypt(&mut cipher, plaintext, &key)?;
+
+    let mut salt = [0u8; 10];
+    #[cfg(feature = "secure_random")]
+    rand_chacha::ChaCha20Rng::from_entropy().fill_bytes(&mut salt);
+    #[cfg(not(feature = "secure_random"))]
+    rand_pcg::Pcg32::from_entropy().fill_bytes(&mut salt);
+
+    cbc::encrypt(&mut cipher, plaintext, &key, &salt)?;
     Ok(cipher)
 }
 

@@ -3,13 +3,11 @@
 //! Notably, it uses a different round number and uses a "tweaked" CBC mode.
 
 use byteorder::{ByteOrder, BE};
-use rand::RngCore;
 use thiserror::Error;
 
 pub mod cbc;
 pub mod ecb;
 mod ecb_impl;
-use rand::prelude::*;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum TcTeaError {
@@ -50,48 +48,70 @@ pub fn parse_key(key: &[u8]) -> Result<[u32; 4], TcTeaError> {
     Ok(parsed)
 }
 
-/// Encrypts an arbitrary length sized data in the following way:
-///
-/// * PadLen  (1 byte)
-/// * Padding (variable, 0-7byte)
-/// * Salt    (2 bytes)
-/// * Body    (? bytes)
-/// * Zero    (7 bytes)
-///
-/// Returned bytes will always have a length multiple of 8.
-///
-/// PadLen/Padding/Salt are randomly bytes, with a minimum of 21 bits (3 * 8 - 3) randomness.
+/// Generate salt for encryption function (or fixed salt if we are not using them)
+fn generate_salt() -> [u8; 10] {
+    #[cfg(not(feature = "random"))]
+    {
+        // Chosen by fair dice roll.
+        // Guaranteed to be random.
+        [0xA5, 0x6E, 0x35, 0xBC, 0x7C, 0x31, 0x04, 0x55, 0xA0, 0xBF]
+    }
+
+    #[cfg(feature = "random")]
+    {
+        use rand::RngCore;
+        use rand::prelude::*;
+        
+        let mut salt = [0u8; 10];
+
+        #[cfg(not(feature = "random_secure"))]
+        rand_pcg::Pcg32::from_entropy().fill_bytes(&mut salt);
+
+        #[cfg(feature = "random_secure")]
+        rand_chacha::ChaCha20Rng::from_entropy().fill_bytes(&mut salt);
+
+        salt
+    }
+}
+
+/// Encrypts given plain text using tc_tea.
 ///
 /// # Panics
 ///
 /// If random number generator fails, it will panic.
-pub fn encrypt<T: AsRef<[u8]>>(plaintext: T, key: &[u8]) -> Result<Vec<u8>, TcTeaError> {
-    let key = parse_key(key)?;
+pub fn encrypt<T, K>(plaintext: T, key: K) -> Result<Vec<u8>, TcTeaError>
+where
+    T: AsRef<[u8]>,
+    K: AsRef<[u8]>,
+{
+    encrypt_with_salt(plaintext, key, &generate_salt())
+}
+
+/// Encrypts given plain text using tc_tea.
+///
+/// # Panics
+///
+/// If random number generator fails, it will panic.
+pub fn encrypt_with_salt<T, K>(plaintext: T, key: K, salt: &[u8; 10]) -> Result<Vec<u8>, TcTeaError>
+where
+    T: AsRef<[u8]>,
+    K: AsRef<[u8]>,
+{
+    let key = parse_key(key.as_ref())?;
     let plaintext = plaintext.as_ref();
     let cipher_len = get_encrypted_size(plaintext.len());
     let mut cipher = vec![0u8; cipher_len];
-
-    let mut salt = [0u8; 10];
-    #[cfg(feature = "secure_random")]
-    rand_chacha::ChaCha20Rng::from_entropy().fill_bytes(&mut salt);
-    #[cfg(not(feature = "secure_random"))]
-    rand_pcg::Pcg32::from_entropy().fill_bytes(&mut salt);
-
     cbc::encrypt(&mut cipher, plaintext, &key, &salt)?;
     Ok(cipher)
 }
 
-/// Decrypts a byte array containing the following:
-///
-/// * PadLen  (1 byte)
-/// * Padding (variable, 0-7byte)
-/// * Salt    (2 bytes)
-/// * Body    (? bytes)
-/// * Zero    (7 bytes)
-///
-/// PadLen is taken from the last 3 bit of the first byte.
-pub fn decrypt<T: AsRef<[u8]>>(encrypted: T, key: &[u8]) -> Result<Vec<u8>, TcTeaError> {
-    let key = parse_key(key)?;
+/// Decrypts tc_tea encrypted data.
+pub fn decrypt<T, K>(encrypted: T, key: K) -> Result<Vec<u8>, TcTeaError>
+where
+    T: AsRef<[u8]>,
+    K: AsRef<[u8]>,
+{
+    let key = parse_key(key.as_ref())?;
     let encrypted = encrypted.as_ref();
     let mut plain = vec![0u8; encrypted.len()];
     let result = cbc::decrypt(&mut plain, encrypted, &key)?;

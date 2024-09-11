@@ -53,7 +53,7 @@ pub fn encrypt<'a>(
     let copy_to_header_len = min(16 - header_len, plain.len());
     let (plain_header, plain) = plain.split_at(copy_to_header_len);
 
-    header[0] = (header[0] & 0b1111_1000) | ((pad_len as u8) & 0b0000_0111);
+    header[0] = (header[0] & !7) | ((pad_len as u8) & 7);
     header[header_len..header_len + copy_to_header_len].copy_from_slice(plain_header);
 
     // Access to slice of "cipher" from inner scope

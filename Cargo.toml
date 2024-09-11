@@ -17,9 +17,12 @@ categories = ["cryptography"]
 maintenance = { status = "as-is" }
 
 [dependencies]
-rand = { version = "0.8.0", features = ["rand_chacha"] }
-rand_chacha = "0.3.1"
+thiserror = "1.0.63"
+rand = { version = "0.8.5" }
+rand_chacha = { version = "0.3.1", optional = true }
+rand_pcg = { version = "0.3.1", optional = true }
+byteorder = "1.5.0"
 
 [features]
-default = ["secure_random"]
-secure_random = ["rand/getrandom"]
+default = ["rand_pcg"]
+secure_random = ["rand/getrandom", "rand/rand_chacha", "rand_chacha"]
